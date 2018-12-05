@@ -19,6 +19,7 @@ import System.Console.CmdArgs.Explicit
 import System.Console.ANSI
 import System.Environment
 import System.Directory.Extra
+import System.Process
 import System.Time.Extra
 import System.Exit
 import System.FilePath
@@ -58,6 +59,9 @@ data Options = Options
     ,max_messages :: Maybe Int
     ,color :: ColorMode
     ,setup :: [String]
+    ,on_pass :: Maybe String
+    ,on_warn :: Maybe String
+    ,on_error :: Maybe String
     }
     deriving (Data,Typeable,Show)
 
@@ -90,6 +94,9 @@ options = cmdArgsMode $ Options
     ,max_messages = Nothing &= name "n" &= help "Maximum number of messages to print"
     ,color = Auto &= name "colour" &= name "color" &= opt Always &= typ "always/never/auto" &= help "Color output (defaults to when the terminal supports it)"
     ,setup = [] &= name "setup" &= typ "COMMAND" &= help "Setup commands to pass to ghci on stdin, usually :set <something>"
+    ,on_warn = Nothing &= name "on_warn" &= typ "COMMAND" &= help "Command to run if warnings"
+    ,on_error = Nothing &= name "on_error" &= typ "COMMAND" &= help "Command to run if errors"
+    ,on_pass = Nothing &= name "on_pass" &= typ "COMMAND" &= help "Command to run if no errors or warnings"
     } &= verbosity &=
     program "ghcid" &= summary ("Auto reloading GHCi daemon v" ++ showVersion version)
 
@@ -274,6 +281,21 @@ runGhcid session waiter termSize termOutput opts@Options{..} = do
                        " " ++ extra ++ [' ' | extra /= ""] ++ "- " ++ project
 
             updateTitle $ if isJust test then "(running test)" else ""
+
+            when (countErrors > 0) $
+                whenJust on_error $ \command -> do
+                    (_, _, _, _) <- createProcess $ shell command
+                    return ()
+
+            when (countWarnings > 0) $
+                whenJust on_warn $ \command -> do
+                    (_, _, _, _) <- createProcess $ shell command
+                    return ()
+
+            when (countErrors == 0 && countWarnings == 0) $
+                whenJust on_pass $ \command -> do
+                    (_, _, _, _) <- createProcess $ shell command
+                    return ()
 
             -- order and restrict the messages
             -- nubOrdOn loadMessage because module cycles generate the same message at several different locations
